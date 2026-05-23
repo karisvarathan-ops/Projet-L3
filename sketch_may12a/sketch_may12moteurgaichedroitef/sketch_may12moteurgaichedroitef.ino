@@ -1,80 +1,225 @@
-#include <Wire.h>  // On importe la bibliotheque I2C
-                   // pour communiquer avec les cartes moteurs
+#include <Wire.h>
 
-// ============================================
-// ADRESSES DES CARTES MOTEURS
-// (trouvées avec le scanner I2C)
-// ============================================
-#define MOTEUR_DROIT  0x66  // carte CC  = chenille droite
-#define MOTEUR_GAUCHE 0x68  // carte D0  = chenille gauche
+// ======================================================
+// CAPTEUR SUIVEUR DE LIGNE
+// ======================================================
 
-// ============================================
-// DIRECTIONS POSSIBLES
-// ============================================
-#define ARRET   0x00  // moteur s'arrete
-#define AVANT   0x01  // moteur tourne en avant
-#define ARRIERE 0x02  // moteur tourne en arriere
+#define ADDR_LF     0x20
+#define REG_DIGITAL 0x07
 
-// ============================================
-// FONCTION POUR PILOTER UN MOTEUR
-// adresse  = quelle carte (0x66 ou 0x68)
-// direction = AVANT, ARRIERE ou ARRET
-// vitesse  = de 0 (lent) a 63 (max)
-// ============================================
-void piloterMoteur(byte adresse, byte direction, byte vitesse) {
-  
-  // Securite : vitesse max = 63
-  if (vitesse > 63) vitesse = 63;
-  
-  // On combine vitesse et direction en 1 seul octet
-  // << 2 signifie "decale les bits de 2 vers la gauche"
-  // | signifie "colle la direction a droite"
+// ======================================================
+// ADRESSES MOTEURS
+// ======================================================
+
+#define MOTEUR_DROIT  0x66
+#define MOTEUR_GAUCHE 0x68
+
+// ======================================================
+// DIRECTIONS MOTEURS
+// (CORRIGE POUR MOTEURS SYMETRIQUES)
+// ======================================================
+
+#define AVANT_DROIT    0x02
+#define AVANT_GAUCHE   0x02
+
+#define ARRIERE_DROIT  0x01
+#define ARRIERE_GAUCHE 0x01
+
+#define ARRET          0x00
+
+// ======================================================
+// VITESSES
+// ======================================================
+
+#define VIT_BASE   30
+#define VIT_MAX    45
+#define VIT_MIN    10
+
+// ======================================================
+// PILOTAGE MOTEUR
+// ======================================================
+
+void piloterMoteur(byte adresse,
+                   byte direction,
+                   byte vitesse)
+{
+  if (vitesse > 63)
+    vitesse = 63;
+
   byte commande = (vitesse << 2) | direction;
-  
-  // On envoie la commande a la carte via I2C
-  Wire.beginTransmission(adresse); // on commence a parler a la carte
-  Wire.write(0x00);                // registre de controle du DRV8830
-  Wire.write(commande);            // on envoie vitesse + direction
-  Wire.endTransmission();          // on termine la communication
+
+  Wire.beginTransmission(adresse);
+
+  Wire.write(0x00);
+  Wire.write(commande);
+
+  Wire.endTransmission();
 }
 
-// ============================================
-// SETUP : s'execute UNE SEULE FOIS au demarrage
-// ============================================
-void setup() {
-  Wire.begin();          // on demarre le bus I2C
-  Serial.begin(9600);    // on demarre le moniteur serie
-  Serial.println("Robot pret !");
-  delay(500);            // on attend 0.5 seconde
+// ======================================================
+// STOP ROBOT
+// ======================================================
+
+void stopRobot()
+{
+  piloterMoteur(MOTEUR_GAUCHE,
+                ARRET,
+                0);
+
+  piloterMoteur(MOTEUR_DROIT,
+                ARRET,
+                0);
 }
 
-// ============================================
-// LOOP : s'execute EN BOUCLE en permanence
-// ============================================
-void loop() {
+// ======================================================
+// LECTURE CAPTEURS
+// ======================================================
 
-  // --- AVANCE ---
-  Serial.println("Avance");
-  piloterMoteur(MOTEUR_DROIT,  AVANT, 50); // chenille droite en avant
-  piloterMoteur(MOTEUR_GAUCHE, AVANT, 50); // chenille gauche en avant
-  delay(2000); // on attend 2 secondes
+uint8_t lireCapteurs()
+{
+  Wire.beginTransmission(ADDR_LF);
 
-  // --- STOP ---
-  Serial.println("Stop");
-  piloterMoteur(MOTEUR_DROIT,  ARRET, 0); // chenille droite stop
-  piloterMoteur(MOTEUR_GAUCHE, ARRET, 0); // chenille gauche stop
-  delay(1000); // on attend 1 seconde
+  Wire.write(REG_DIGITAL);
 
-  // --- RECULE ---
-  Serial.println("Recule");
-  piloterMoteur(MOTEUR_DROIT,  ARRIERE, 50); // chenille droite en arriere
-  piloterMoteur(MOTEUR_GAUCHE, ARRIERE, 50); // chenille gauche en arriere
-  delay(2000); // on attend 2 secondes
+  Wire.endTransmission(false);
 
-  // --- STOP ---
-  Serial.println("Stop");
-  piloterMoteur(MOTEUR_DROIT,  ARRET, 0); // chenille droite stop
-  piloterMoteur(MOTEUR_GAUCHE, ARRET, 0); // chenille gauche stop
-  delay(1000); // on attend 1 seconde
+  Wire.requestFrom((uint8_t)ADDR_LF,
+                   (uint8_t)1);
 
+  if (!Wire.available())
+    return 0xFF;
+
+  return Wire.read() & 0x0F;
+}
+
+// ======================================================
+// SETUP
+// ======================================================
+
+void setup()
+{
+  Wire.begin();
+
+  Serial.begin(9600);
+
+  Serial.println("=== SUIVEUR DE LIGNE ===");
+}
+
+// ======================================================
+// LOOP
+// ======================================================
+
+void loop()
+{
+  uint8_t e = lireCapteurs();
+
+  int vG = VIT_BASE;
+  int vD = VIT_BASE;
+
+  // ==================================================
+  // LIGNE AU CENTRE
+  // ==================================================
+
+  if (e == 0b1001 || e == 0b0110)
+  {
+    vG = 30;
+    vD = 30;
+  }
+
+  // ==================================================
+  // PETIT VIRAGE GAUCHE
+  // ==================================================
+
+  else if (e == 0b0001)
+  {
+    vG = 15;
+    vD = 38;
+  }
+
+  // ==================================================
+  // GROS VIRAGE GAUCHE
+  // ==================================================
+
+  else if (e == 0b0011 || e == 0b0111)
+  {
+    vG = 10;
+    vD = 42;
+  }
+
+  // ==================================================
+  // PETIT VIRAGE DROITE
+  // ==================================================
+
+  else if (e == 0b1000)
+  {
+    vG = 38;
+    vD = 15;
+  }
+
+  // ==================================================
+  // GROS VIRAGE DROITE
+  // ==================================================
+
+  else if (e == 0b1100 || e == 0b1110)
+  {
+    vG = 42;
+    vD = 10;
+  }
+
+  // ==================================================
+  // BLANC TOTAL = LIGNE PERDUE
+  // ==================================================
+
+  else if (e == 0b1111)
+  {
+    stopRobot();
+
+    Serial.println("BLANC");
+
+    return;
+  }
+
+  // ==================================================
+  // NOIR TOTAL = ARRIVEE
+  // ==================================================
+
+  else if (e == 0b0000)
+  {
+    stopRobot();
+
+    Serial.println("NOIR");
+
+    return;
+  }
+
+  // ==================================================
+  // ENVOI AUX MOTEURS
+  // ==================================================
+
+  piloterMoteur(MOTEUR_GAUCHE,
+                AVANT_GAUCHE,
+                constrain(vG,
+                          VIT_MIN,
+                          VIT_MAX));
+
+  piloterMoteur(MOTEUR_DROIT,
+                AVANT_DROIT,
+                constrain(vD,
+                          VIT_MIN,
+                          VIT_MAX));
+
+  // ==================================================
+  // DEBUG
+  // ==================================================
+
+  Serial.print("Capteurs : ");
+  Serial.print(e, BIN);
+
+  Serial.print(" | VG:");
+  Serial.print(vG);
+
+  Serial.print(" | VD:");
+  Serial.println(vD);
+
+  delay(10);
 }

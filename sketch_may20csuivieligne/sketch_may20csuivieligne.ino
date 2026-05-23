@@ -151,7 +151,7 @@ float calculErreur(int valeur)
     // LIGNE AU CENTRE
     // ==========================================
 
-    if(valeur >= 15 && valeur <= 35)
+    if(valeur >= 15 && valeur <= 60)
     {
         return 0;
     }
@@ -160,7 +160,7 @@ float calculErreur(int valeur)
     // LIGNE A GAUCHE
     // ==========================================
 
-    else if(valeur > 35 && valeur <= 60)
+    else if(valeur > 50 && valeur <= 60)
     {
         return -3;
     }
